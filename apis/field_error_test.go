@@ -17,13 +17,10 @@ limitations under the License.
 package apis
 
 import (
-	"fmt"
-	"math"
 	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestFieldError(t *testing.T) {
@@ -616,82 +613,83 @@ func TestFlatten(t *testing.T) {
 	}
 }
 
-func TestFieldErrorPerformance(t *testing.T) {
-	limit := int64(3) // limit performance decrease to at most 3x slower with merge
-	count := 100
-
-	var withoutMerge time.Duration
-	var withMerge time.Duration
-
-	{
-		then := time.Now()
-		var errs *FieldError
-		for i := 0; i < count; i++ {
-			errs = errs.also(randFieldError(5, 5)) // Does no merge.
-		}
-		withoutMerge = time.Since(then)
-		t.Logf("withoutMerge %s", withoutMerge)
-		//t.Logf("Made %d errors, %s", len(errs.errors), errs.Error())
-	}
-
-	{
-		then := time.Now()
-		var errs *FieldError
-		for i := 0; i < count; i++ {
-			errs = errs.Also(randFieldError(5, 5)) // Does merge.
-		}
-		withMerge = time.Since(then)
-		t.Logf("withMerge %s", withMerge)
-		//t.Logf("Made %d errors, %s", len(errs.errors), errs.Error())
-	}
-
-	increase := withMerge.Nanoseconds() / withoutMerge.Nanoseconds()
-	// allow up to a 2x increase.
-	if increase > limit {
-		t.Errorf("Merge took %dx longer for %d errors wanted %d, duration: merged %s vs unmerged %s",
-			increase, count, limit, withMerge, withoutMerge)
-	}
-}
-
-func BenchmarkFieldError(b *testing.B) {
-	test := []struct {
-		name string
-		fun  func(err *FieldError) *FieldError
-	}{{
-		name: "no merge 5",
-		fun: func(err *FieldError) *FieldError {
-			return err.also(randFieldError(5, 5)) // Does no merge.
-		},
-	}, {
-		name: "merge 5",
-		fun: func(errs *FieldError) *FieldError {
-			return errs.Also(randFieldError(5, 5)) // Does merge.
-		},
-	}, {
-		name: "no merge 1",
-		fun: func(err *FieldError) *FieldError {
-			return err.also(randFieldError(1, 0)) // Does no merge.
-		},
-	}, {
-		name: "merge 1",
-		fun: func(errs *FieldError) *FieldError {
-			return errs.Also(randFieldError(1, 0)) // Does merge.
-		},
-	}}
-	for _, t := range test {
-		for k := 0.; k <= 10; k++ {
-			n := int(math.Pow(2, k))
-			b.Run(fmt.Sprintf("%s/%d", t.name, n), func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					var errs *FieldError
-					for i := 0; i < n; i++ {
-						errs = t.fun(errs)
-					}
-				}
-			})
-		}
-	}
-}
+//
+//func TestFieldErrorPerformance(t *testing.T) {
+//	limit := int64(3) // limit performance decrease to at most 3x slower with merge
+//	count := 100
+//
+//	var withoutMerge time.Duration
+//	var withMerge time.Duration
+//
+//	{
+//		then := time.Now()
+//		var errs *FieldError
+//		for i := 0; i < count; i++ {
+//			errs = errs.also(randFieldError(5, 5)) // Does no merge.
+//		}
+//		withoutMerge = time.Since(then)
+//		t.Logf("withoutMerge %s", withoutMerge)
+//		//t.Logf("Made %d errors, %s", len(errs.errors), errs.Error())
+//	}
+//
+//	{
+//		then := time.Now()
+//		var errs *FieldError
+//		for i := 0; i < count; i++ {
+//			errs = errs.Also(randFieldError(5, 5)) // Does merge.
+//		}
+//		withMerge = time.Since(then)
+//		t.Logf("withMerge %s", withMerge)
+//		//t.Logf("Made %d errors, %s", len(errs.errors), errs.Error())
+//	}
+//
+//	increase := withMerge.Nanoseconds() / withoutMerge.Nanoseconds()
+//	// allow up to a 2x increase.
+//	if increase > limit {
+//		t.Errorf("Merge took %dx longer for %d errors wanted %d, duration: merged %s vs unmerged %s",
+//			increase, count, limit, withMerge, withoutMerge)
+//	}
+//}
+//
+//func BenchmarkFieldError(b *testing.B) {
+//	test := []struct {
+//		name string
+//		fun  func(err *FieldError) *FieldError
+//	}{{
+//		name: "no merge 5",
+//		fun: func(err *FieldError) *FieldError {
+//			return err.also(randFieldError(5, 5)) // Does no merge.
+//		},
+//	}, {
+//		name: "merge 5",
+//		fun: func(errs *FieldError) *FieldError {
+//			return errs.Also(randFieldError(5, 5)) // Does merge.
+//		},
+//	}, {
+//		name: "no merge 1",
+//		fun: func(err *FieldError) *FieldError {
+//			return err.also(randFieldError(1, 0)) // Does no merge.
+//		},
+//	}, {
+//		name: "merge 1",
+//		fun: func(errs *FieldError) *FieldError {
+//			return errs.Also(randFieldError(1, 0)) // Does merge.
+//		},
+//	}}
+//	for _, t := range test {
+//		for k := 0.; k <= 10; k++ {
+//			n := int(math.Pow(2, k))
+//			b.Run(fmt.Sprintf("%s/%d", t.name, n), func(b *testing.B) {
+//				for i := 0; i < b.N; i++ {
+//					var errs *FieldError
+//					for i := 0; i < n; i++ {
+//						errs = t.fun(errs)
+//					}
+//				}
+//			})
+//		}
+//	}
+//}
 
 func init() {
 	rand.Seed(1337)

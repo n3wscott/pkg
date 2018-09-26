@@ -37,7 +37,7 @@ type FieldError struct {
 	// Details contains an optional longer payload.
 	// +optional
 	Details string
-	errors  []FieldError
+	errors  map[string]FieldError
 }
 
 // FieldError implements error
@@ -61,14 +61,11 @@ func (fe *FieldError) ViaField(prefix ...string) *FieldError {
 		for _, oldPath := range e.Paths {
 			newPaths = append(newPaths, flatten(append(prefix, oldPath)))
 		}
-		sort.Slice(newPaths, func(i, j int) bool { return newPaths[i] < newPaths[j] })
 		e.Paths = newPaths
 
 		// Append the mutated error to the errors list.
-		newErr = newErr.also(&e)
+		newErr = newErr.Also(&e)
 	}
-	// And then merge the normalized errors
-	newErr.errors = merge(newErr.getNormalizedErrors())
 	return newErr
 }
 
@@ -105,41 +102,37 @@ func (fe *FieldError) ViaFieldKey(field string, key string) *FieldError {
 }
 
 // also collects errors, returns a new collection of existing errors and new errors.
-func (fe *FieldError) also(errs ...*FieldError) *FieldError {
-	newErr := &FieldError{}
+func (fe *FieldError) Also(errs ...*FieldError) *FieldError {
+	newErrs := &FieldError{}
 	// collect the current objects errors, if it has any
 	if fe != nil {
-		newErr.errors = fe.getNormalizedErrors()
+		newErrs.errors = fe.getNormalizedErrors()
 	}
 	// and then collect the passed in errors
 	for _, e := range errs {
-		newErr.errors = append(newErr.errors, e.getNormalizedErrors()...)
+		k := key(e)
+		if err, ok := newErrs.errors[k]; ok {
+			// merge the keys.
+			newErr := newErrs.errors[k]
+			newErr.Paths = mergePaths(newErr.Paths, err.Paths)
+			newErrs.errors[k] = newErr
+		} else {
+			newErrs.errors[k] = err
+		}
 	}
-	if len(newErr.errors) == 0 {
+	if len(newErrs.errors) == 0 {
 		return nil
 	}
-	return newErr
+	return newErrs
 }
 
-// Also collects errors, returns a new collection of existing errors and new
-// errors, and then merges all errors that are merge-able.
-func (fe *FieldError) Also(errs ...*FieldError) *FieldError {
-	newErr := fe.also(errs...)
-
-	if newErr != nil {
-		// And then merge the normalized errors
-		newErr.errors = merge(newErr.getNormalizedErrors())
-	}
-	return newErr
-}
-
-func (fe *FieldError) getNormalizedErrors() []FieldError {
+func (fe *FieldError) getNormalizedErrors() map[string]FieldError {
 	// in case we call getNormalizedErrors on a nil object, return just an empty
 	// list. This can happen when .Error() is called on a nil object.
 	if fe == nil {
-		return []FieldError(nil)
+		return map[string]FieldError(nil)
 	}
-	var errors []FieldError
+	errors := make(map[string]FieldError, len(fe.errors))
 	// if this FieldError is a leaf,
 	if fe.Message != "" {
 		err := FieldError{
@@ -147,14 +140,42 @@ func (fe *FieldError) getNormalizedErrors() []FieldError {
 			Paths:   fe.Paths,
 			Details: fe.Details,
 		}
-		errors = append(errors, err)
+		errors[key(&err)] = err
+
 	}
 	// and then collect all other errors recursively.
 	for _, e := range fe.errors {
-		errors = append(errors, e.getNormalizedErrors()...)
+		for k, err := range e.getNormalizedErrors() {
+			if v, ok := errors[k]; ok {
+				// merge the keys.
+				v.Paths = mergePaths(v.Paths, err.Paths) // TODO: this is hard.
+				errors[k] = v
+			} else {
+				errors[k] = err
+			}
+		}
 	}
 
 	return errors
+}
+
+func mergePaths(a, b []string) []string {
+	newPaths := make([]string, 0, len(a)+len(b))
+	newPaths = append(newPaths, a...)
+	for p := 0; p < len(b); p++ {
+		if containsString(newPaths, b[p]) == false {
+			newPaths = append(newPaths, b[p])
+		}
+	}
+	return newPaths
+}
+
+func asIndex(index int) string {
+	return fmt.Sprintf("[%d]", index)
+}
+
+func asKey(key string) string {
+	return fmt.Sprintf("[%s]", key)
 }
 
 // merge will combine errors that differ only in their paths.
@@ -164,6 +185,9 @@ func merge(errors []FieldError) []FieldError {
 		return errors
 	}
 
+	//ignoreArguments := cmpopts.IgnoreFields(FieldError{}, "Paths")
+	//ignoreUnexported := cmpopts.IgnoreUnexported(FieldError{})
+
 	// Sort first.
 	sort.Slice(errors, func(i, j int) bool { return errors[i].Message < errors[j].Message })
 
@@ -172,12 +196,13 @@ func merge(errors []FieldError) []FieldError {
 	curr := 0
 	for i := 1; i < len(errors); i++ {
 		if newErrors[curr].Message == errors[i].Message && newErrors[curr].Details == errors[i].Details {
+			//if diff := cmp.Diff(newErrors[curr], errors[i], ignoreArguments, ignoreUnexported); diff == "" {
 			// they match, merge the paths.
 			nextPaths := make([]string, 0, len(errors[i].Paths)+len(newErrors[curr].Paths))
 			for p := 0; p < len(errors[i].Paths); p++ {
 				// Check that the path that is about to be appended is not
 				// already in the list
-				if containsString(newErrors[curr].Paths, errors[i].Paths[p]) == false { // TODO sort the path keys too?
+				if containsString(newErrors[curr].Paths, errors[i].Paths[p]) == false {
 					nextPaths = append(nextPaths, errors[i].Paths[p])
 				}
 			}
@@ -199,14 +224,6 @@ func containsString(slice []string, s string) bool {
 		}
 	}
 	return false
-}
-
-func asIndex(index int) string {
-	return fmt.Sprintf("[%d]", index)
-}
-
-func asKey(key string) string {
-	return fmt.Sprintf("[%s]", key)
 }
 
 // flatten takes in a array of path components and looks for chances to flatten
@@ -235,10 +252,24 @@ func isIndex(part string) bool {
 	return strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]")
 }
 
+// key returns the key that should be used for a given FieldError for the
+// internal map that stores errors.
+func key(err *FieldError) string {
+	return fmt.Sprintf("%s-%s", err.Message, err.Details)
+}
+
 // Error implements error
 func (fe *FieldError) Error() string {
 	var errs []string
+
+	errors := make([]FieldError, 0, len(fe.errors))
 	for _, e := range fe.getNormalizedErrors() {
+		errors = append(errors, e)
+	}
+	sort.Slice(errors, func(i, j int) bool { return errors[i].Message < errors[j].Message })
+
+	for _, e := range errors {
+		sort.Slice(e.Paths, func(i, j int) bool { return e.Paths[i] < e.Paths[j] })
 		if e.Details == "" {
 			errs = append(errs, fmt.Sprintf("%v: %v", e.Message, strings.Join(e.Paths, ", ")))
 		} else {
