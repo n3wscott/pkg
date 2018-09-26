@@ -177,7 +177,7 @@ func merge(errors []FieldError) []FieldError {
 			for p := 0; p < len(errors[i].Paths); p++ {
 				// Check that the path that is about to be appended is not
 				// already in the list
-				if containsString(newErrors[curr].Paths, errors[i].Paths[p]) == false {
+				if containsString(newErrors[curr].Paths, errors[i].Paths[p]) == false { // TODO sort the path keys too?
 					nextPaths = append(nextPaths, errors[i].Paths[p])
 				}
 			}
